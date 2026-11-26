@@ -2,7 +2,7 @@
 
 [![make.fun bounty](https://make.fun/badge/best-flight-game-20261126-0057.svg)](https://make.fun/bounty/best-flight-game-20261126-0057)
 [![Rank](https://make.fun/badge/best-flight-game-20261126-0057/rren7975-cell/best-flight-game-20261126/rank.svg)](https://make.fun/bounty/best-flight-game-20261126-0057)
-[![Reward](https://make.fun/badge/best-flight-game-20261126-0057/reward.svg)](https://make.fun/bounty/best-flight-game-20261126-0057)
+[![Reward](https://make.fun/badge/best-flight-game-20261126-0057/rren7975-cell/best-flight-game-20261126/reward.svg)](https://make.fun/bounty/best-flight-game-20261126-0057)
 
 A complete pseudo-3D flight game in the browser: fly a rescue plane down a
 seeded alpine valley, thread 8 rings, slalom 8 canyon gates, then set her
