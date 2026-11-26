@@ -1,14 +1,15 @@
 // Boot and the one loop: input is read every frame, the flight model
 // advances in fixed 1/60 s steps (several in a slow frame, none in a fast
-// one), and the renderer paints what is there. The game moves between five
-// screens: title, play, paused, crashed and landed.
+// one), and the renderer paints what is there. The game moves between six
+// screens: title (pick one of three aircraft), play, shop (between stages),
+// paused, crashed and landed.
 //
-// ?seed=N fixes the valley and the course. ?shot=start|rings|slalom|landing
+// ?seed=N fixes the valley and the course. ?shot=start|rings|coastal|shop|landing
 // (with &seed=N) stages that scene instead of running the loop, paints it
 // twice and sets window.__shotReady for a screenshot.
-import { BEST_KEY, STEP } from './config.js';
+import { AIRCRAFTS, AIRCRAFT_ORDER, BEST_KEY, STEP } from './config.js';
 import { createRandom } from './random.js';
-import { createFlight, EVENT_CRASHED, EVENT_LANDED } from './flight.js';
+import { createFlight, EVENT_CRASHED, EVENT_LANDED, EVENT_STAGE } from './flight.js';
 import { ACTION_CONFIRM, ACTION_PAUSE, createInput } from './input.js';
 import {
   createRenderer,
@@ -16,6 +17,7 @@ import {
   SCREEN_OVER,
   SCREEN_PAUSED,
   SCREEN_PLAY,
+  SCREEN_SHOP,
   SCREEN_TITLE,
 } from './render.js';
 import { stageShot } from './autopilot.js';
@@ -30,7 +32,7 @@ const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() 
 
 const canvas = document.getElementById('game');
 const status = document.getElementById('status');
-const flight = createFlight(createRandom(seed));
+let flight = createFlight(createRandom(seed), 'bush');
 const renderer = createRenderer(canvas);
 
 function readBest() {
@@ -53,7 +55,7 @@ function runShot(name) {
   const scene = stageShot(name, flight);
   let painted = 0;
   function paint() {
-    renderer.draw(flight.state, scene.screen, readBest());
+    renderer.draw(flight.state, scene.screen, readBest(), { aircraft: 'bush' });
     painted += 1;
     if (painted < 2) requestAnimationFrame(paint);
     else window.__shotReady = true;
@@ -67,6 +69,20 @@ function runGame() {
   let best = readBest();
   let accumulator = 0;
   let last = performance.now();
+  let aircraft = 'bush';
+
+  // Digit keys (1/2/3) pick an aircraft on the title screen and buy
+  // upgrades in the shop; R restarts from the pause menu. The input
+  // module only queues confirm/pause, so digits get their own listener.
+  let digitPressed = null;
+  let restartPressed = false;
+  window.addEventListener('keydown', (event) => {
+    if (event.repeat) return;
+    if (event.code === 'Digit1') digitPressed = 1;
+    else if (event.code === 'Digit2') digitPressed = 2;
+    else if (event.code === 'Digit3') digitPressed = 3;
+    else if (event.code === 'KeyR') restartPressed = true;
+  });
 
   // Screen readers (and anyone watching the page's text) hear the screen
   // changes and each scored ring.
@@ -75,10 +91,10 @@ function runGame() {
   }
 
   function startGame() {
-    flight.reset();
+    flight = createFlight(createRandom(seed), aircraft);
     accumulator = 0;
     screen = SCREEN_PLAY;
-    announce('Flying. Ring Run: 8 rings ahead.');
+    announce(`Flying the ${flight.state.aircraft.name}. Stage 1: 8 rings ahead.`);
   }
 
   function endGame() {
@@ -93,24 +109,59 @@ function runGame() {
       : `Crashed. Score ${flight.state.score}. Best ${best}.`);
   }
 
+  function openShop() {
+    screen = SCREEN_SHOP;
+    announce(`Stage ${flight.state.shopStage + 1} complete. Spend your ${flight.state.stars} stars, then fly on.`);
+  }
+
   function handleActions() {
     const actions = input.takeActions();
-    if (actions & ACTION_CONFIRM
-      && (screen === SCREEN_TITLE || screen === SCREEN_OVER || screen === SCREEN_LANDED)) {
-      startGame();
-    } else if (actions & ACTION_PAUSE && screen === SCREEN_PLAY) {
-      screen = SCREEN_PAUSED;
-      announce('Paused.');
-    } else if (actions & (ACTION_PAUSE | ACTION_CONFIRM) && screen === SCREEN_PAUSED) {
-      screen = SCREEN_PLAY;
-      announce('Flying.');
+    const digit = digitPressed;
+    digitPressed = null;
+    if (screen === SCREEN_TITLE) {
+      if (digit !== null) {
+        aircraft = AIRCRAFT_ORDER[digit - 1];
+        announce(`Selected ${AIRCRAFTS[aircraft].name}.`);
+      } else if (actions & ACTION_CONFIRM) {
+        startGame();
+      }
+    } else if (screen === SCREEN_SHOP) {
+      if (digit !== null) {
+        const id = ['engine', 'tank', 'armor'][digit - 1];
+        const ok = flight.buyUpgrade(id);
+        announce(ok ? `Bought ${id}. ${flight.state.stars} stars left.` : `Cannot buy ${id} — not enough stars or maxed out.`);
+      } else if (actions & ACTION_CONFIRM) {
+        flight.continueAfterShop();
+        screen = SCREEN_PLAY;
+        announce(`Stage ${flight.state.stage + 1}: fly!`);
+      }
+    } else if (screen === SCREEN_PAUSED) {
+      if (actions & (ACTION_PAUSE | ACTION_CONFIRM)) {
+        screen = SCREEN_PLAY;
+        announce('Flying.');
+      } else if (restartPressed) {
+        restartPressed = false;
+        screen = SCREEN_TITLE;
+        announce('Ring Runner. Pick a plane, press Space to fly.');
+      }
+    } else if (screen === SCREEN_PLAY) {
+      if (actions & ACTION_PAUSE) {
+        screen = SCREEN_PAUSED;
+        announce('Paused. P resume, R restart.');
+      }
+    } else if (actions & ACTION_CONFIRM
+      && (screen === SCREEN_OVER || screen === SCREEN_LANDED)) {
+      screen = SCREEN_TITLE;
+      announce('Ring Runner. Pick a plane, press Space to fly.');
     }
+    if (screen !== SCREEN_PAUSED) restartPressed = false;
   }
 
   function step() {
     const events = flight.step(
       STEP, input.bankStick(), input.pitchStick(), input.throttleDelta());
     if (events & (EVENT_CRASHED | EVENT_LANDED)) endGame();
+    else if (events & EVENT_STAGE) openShop();
     else if (flight.state.messageTimer > 0) announce(flight.state.message);
   }
 
@@ -127,7 +178,7 @@ function runGame() {
     } else {
       accumulator = 0;
     }
-    renderer.draw(flight.state, screen, best);
+    renderer.draw(flight.state, screen, best, { aircraft });
   }
 
   // Leaving the tab pauses a running game rather than letting the plane fly unseen.
@@ -138,7 +189,7 @@ function runGame() {
     }
   });
 
-  announce('Ring Runner. Press Space or click to fly.');
+  announce('Ring Runner. Pick a plane with 1, 2 or 3, then press Space to fly.');
   requestAnimationFrame(frame);
 }
 
